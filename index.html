@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Flight Sim — Visuals</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width:100%; height:100%; overflow:hidden; font-family: ui-monospace, "SF Mono", Menlo, monospace; color:#dfe7ee; background:#000; }
+  #c { display:block; width:100%; height:100%; }
+  .panel { position:fixed; background:rgba(6,12,20,.62); border:1px solid #233a52; border-radius:8px; backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); padding:9px 13px; font-size:12px; line-height:1.55; }
+  #hud { top:14px; left:14px; min-width:220px; }
+  #hud .row { display:flex; justify-content:space-between; gap:18px; }
+  #hud .lbl { color:#7ab2c8; }
+  #hud .val { color:#fff; font-weight:600; }
+  #hud .warn { color:#ff5252; font-weight:700; animation:blink .6s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  #help { bottom:14px; left:14px; max-width:520px; color:#9bb; }
+  #help kbd { background:#1a2a3a; color:#dfe7ee; padding:1px 5px; border-radius:3px; font-size:11px; margin:0 1px; border:1px solid #2a4a6a; }
+  #tod { top:14px; right:14px; text-align:right; min-width:140px; }
+  #tod .big { color:#ffd166; font-weight:700; font-size:14px; letter-spacing:1px; }
+  #tod .sub { color:#7ab2c8; font-size:11px; }
+  #intro { position:fixed; inset:0; background:rgba(0,5,12,.84); display:flex; align-items:center; justify-content:center; z-index:10; }
+  #intro .card { max-width:560px; padding:28px 32px; border:1px solid #233a52; border-radius:12px; background:rgba(8,14,22,.92); }
+  #intro h1 { font-size:32px; color:#ffd166; margin-bottom:6px; letter-spacing:2px; }
+  #intro .sub { color:#9bb; margin-bottom:18px; font-size:13px; }
+  #intro .ctrls { display:grid; grid-template-columns: 1fr 1fr; gap:6px 18px; font-size:13px; color:#dfe7ee; margin-bottom:14px; }
+  #intro .ctrls span:first-child { color:#7ab2c8; }
+  #intro .tip { font-size:12px; color:#9bb; line-height:1.6; }
+  #intro .go { text-align:center; color:#ffd166; font-size:13px; margin-top:14px; animation:blink 1s steps(2) infinite; }
+  #intro kbd { background:#1a2a3a; color:#dfe7ee; padding:1px 6px; border-radius:3px; font-size:12px; border:1px solid #2a4a6a; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud" class="panel">
+  <div class="row"><span class="lbl">SPD</span><span class="val"><span id="spd">0</span> km/h</span></div>
+  <div class="row"><span class="lbl">ALT</span><span class="val"><span id="alt">0</span> m</span></div>
+  <div class="row"><span class="lbl">HDG</span><span class="val"><span id="hdg">000</span>°</span></div>
+  <div class="row"><span class="lbl">V/S</span><span class="val"><span id="vs">0</span> m/s</span></div>
+  <div class="row"><span class="lbl">THR</span><span class="val"><span id="thr">0</span>%</span></div>
+  <div class="row"><span class="lbl">FIELD</span><span class="val" id="apnear">—</span></div>
+  <div class="row"><span id="stall" class="warn" style="display:none">⚠ STALL</span></div>
+</div>
+<div id="tod" class="panel">
+  <div class="big" id="todTime">06:00</div>
+  <div class="sub" id="todPhase">dawn</div>
+</div>
+<div id="help" class="panel">
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>↑</kbd>/<kbd>↓</kbd> pitch · <kbd>←</kbd>/<kbd>→</kbd> roll · <kbd>A</kbd>/<kbd>D</kbd> yaw · <kbd>Space</kbd> brakes · <kbd>T</kbd> time · <kbd>R</kbd> reset
+</div>
+<div id="intro">
+  <div class="card">
+    <h1>FLIGHT SIM · VISUALS</h1>
+    <div class="sub">Dynamic skies · procedural mountains · four airstrips · 24 km world</div>
+    <div class="ctrls">
+      <span>Throttle</span><span><kbd>W</kbd> up / <kbd>S</kbd> down</span>
+      <span>Pitch</span><span><kbd>↑</kbd> / <kbd>↓</kbd></span>
+      <span>Roll</span><span><kbd>←</kbd> / <kbd>→</kbd></span>
+      <span>Yaw (rudder)</span><span><kbd>A</kbd> / <kbd>D</kbd></span>
+      <span>Brakes (ground)</span><span><kbd>Space</kbd></span>
+      <span>Cycle time of day</span><span><kbd>T</kbd></span>
+      <span>Reset</span><span><kbd>R</kbd></span>
+    </div>
+    <div class="tip">
+      Push throttle to ~80%. At ~140 km/h pull back gently on <kbd>↑</kbd> to rotate. Press <kbd>T</kbd> mid-flight to watch the sun arc across the world — dawn glow, midday haze, golden hour, dusk, and starlit night.
+    </div>
+    <div class="go">CLICK or press SPACE to fly</div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ============================================================
+// Inline 2D value-gradient noise (Perlin-style); compact + fast
+// ============================================================
+function makeNoise(seed) {
+  let s = seed >>> 0 || 1;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  const perm = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) perm[i] = i;
+  for (let i = 255; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); const t = perm[i]; perm[i] = perm[j]; perm[j] = t; }
+  const p = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) p[i] = perm[i & 255];
+  const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const lerp = (a, b, t) => a + t * (b - a);
+  const grad = (h, x, y) => {
+    const u = (h & 1) ? x : -x;
+    const v = (h & 2) ? y : -y;
+    return ((h & 4) ? u : -u) + ((h & 8) ? v : -v);
+  };
+  return function (x, y) {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+    x -= Math.floor(x); y -= Math.floor(y);
+    const u = fade(x), v = fade(y);
+    const A = p[X] + Y, B = p[X + 1] + Y;
+    return lerp(
+      lerp(grad(p[A], x, y), grad(p[B], x - 1, y), u),
+      lerp(grad(p[A + 1], x, y - 1), grad(p[B + 1], x - 1, y - 1), u),
+      v
+    );
+  };
+}
+const noise2D = makeNoise(20260621);
+function fbm(x, y) {
+  let v = 0, a = 1, f = 1, n = 0;
+  for (let i = 0; i < 5; i++) { v += a * noise2D(x * f, y * f); n += a; a *= 0.5; f *= 2; }
+  return v / n;
+}
+
+// ============================================================
+// Renderer / Scene
+// ============================================================
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 32000);
+
+const WORLD = 24000;
+
+// ============================================================
+// Sky dome — vertex-color gradient, recolored per TOD frame
+// ============================================================
+const skyGeo = new THREE.SphereGeometry(15000, 40, 24);
+skyGeo.scale(-1, 1, 1);
+const skyColors = new Float32Array(skyGeo.attributes.position.count * 3);
+skyGeo.setAttribute('color', new THREE.BufferAttribute(skyColors, 3));
+const skyMat = new THREE.MeshBasicMaterial({ vertexColors: true, depthWrite: false, fog: false });
+const sky = new THREE.Mesh(skyGeo, skyMat);
+scene.add(sky);
+
+const skyTopC = new THREE.Color();
+const skyHorC = new THREE.Color();
+const skyBotC = new THREE.Color();
+function paintSky() {
+  const sp = skyGeo.attributes.position;
+  for (let i = 0; i < sp.count; i++) {
+    const y = sp.getY(i) / 15000; // -1..1
+    let c;
+    if (y > 0) {
+      const t = Math.pow(y, 0.6);
+      c = skyHorC.clone().lerp(skyTopC, t);
+    } else {
+      const t = Math.pow(-y, 0.7);
+      c = skyHorC.clone().lerp(skyBotC, t);
+    }
+    skyColors[i * 3] = c.r; skyColors[i * 3 + 1] = c.g; skyColors[i * 3 + 2] = c.b;
+  }
+  skyGeo.attributes.color.needsUpdate = true;
+}
+
+// ============================================================
+// Lights
+// ============================================================
+const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+scene.add(sun);
+const sunTarget = new THREE.Object3D(); scene.add(sunTarget); sun.target = sunTarget;
+const hemi = new THREE.HemisphereLight(0x88aacc, 0x223044, 0.55);
+scene.add(hemi);
+const ambient = new THREE.AmbientLight(0x202838, 0.3);
+scene.add(ambient);
+// rim light on the plane — placed opposite of sun, low intensity
+const rim = new THREE.DirectionalLight(0x88ccff, 0.55);
+scene.add(rim);
+const rimTarget = new THREE.Object3D(); scene.add(rimTarget); rim.target = rimTarget;
+
+scene.fog = new THREE.Fog(0x9bbcd6, 1200, 14000);
+
+// ============================================================
+// Terrain — procedural heightfield with mountains
+// ============================================================
+const TSEG = 200;
+const terrainGeo = new THREE.PlaneGeometry(WORLD, WORLD, TSEG, TSEG);
+terrainGeo.rotateX(-Math.PI / 2);
+
+const heights = new Float32Array((TSEG + 1) * (TSEG + 1));
+function heightAtNorm(nx, nz) {
+  const m = fbm(nx * 1.4, nz * 1.4);
+  const ridge = 1 - Math.abs(fbm(nx * 2.6 + 11, nz * 2.6 - 7));
+  const detail = fbm(nx * 6.5, nz * 6.5) * 0.25;
+  let h = 0;
+  h += Math.max(0, m) * 1400 * Math.pow(ridge, 1.4);
+  h += m * 220;
+  h += detail * 60;
+  const distC = Math.sqrt(nx * nx + nz * nz);
+  if (distC < 0.18) h *= distC / 0.18;
+  return h;
+}
+
+const tpos = terrainGeo.attributes.position;
+for (let i = 0; i < tpos.count; i++) {
+  const x = tpos.getX(i), z = tpos.getZ(i);
+  const nx = x / WORLD, nz = z / WORLD;
+  const h = heightAtNorm(nx, nz);
+  tpos.setY(i, h);
+  const ix = Math.round((x / WORLD + 0.5) * TSEG);
+  const iz = Math.round((z / WORLD + 0.5) * TSEG);
+  heights[iz * (TSEG + 1) + ix] = h;
+}
+function groundAt(x, z) {
+  const fx = (x / WORLD + 0.5) * TSEG;
+  const fz = (z / WORLD + 0.5) * TSEG;
+  if (fx < 0 || fz < 0 || fx >= TSEG || fz >= TSEG) return 0;
+  const ix = Math.floor(fx), iz = Math.floor(fz);
+  const tx = fx - ix, tz = fz - iz;
+  const W = TSEG + 1;
+  const h00 = heights[iz * W + ix];
+  const h10 = heights[iz * W + ix + 1];
+  const h01 = heights[(iz + 1) * W + ix];
+  const h11 = heights[(iz + 1) * W + ix + 1];
+  return (h00 * (1 - tx) + h10 * tx) * (1 - tz) + (h01 * (1 - tx) + h11 * tx) * tz;
+}
+
+// vertex colors by elevation
+const tcol = new Float32Array(tpos.count * 3);
+const cGrass = new THREE.Color(0x4a6e3a);
+const cDark = new THREE.Color(0x2e4d28);
+const cRock = new THREE.Color(0x6b6258);
+const cSnow = new THREE.Color(0xe8eef2);
+const cSand = new THREE.Color(0xc9b585);
+for (let i = 0; i < tpos.count; i++) {
+  const y = tpos.getY(i);
+  const c = new THREE.Color();
+  if (y < 8) c.copy(cSand);
+  else if (y < 220) {
+    const t = (y - 8) / 212;
+    c.copy(cGrass).lerp(cDark, Math.random() * 0.3 + t * 0.25);
+  } else if (y < 700) {
+    const t = (y - 220) / 480;
+    c.copy(cDark).lerp(cRock, t);
+  } else if (y < 1100) {
+    const t = (y - 700) / 400;
+    c.copy(cRock).lerp(cSnow, t * 0.9);
+  } else c.copy(cSnow);
+  const j = 0.92 + Math.random() * 0.16;
+  tcol[i * 3] = c.r * j; tcol[i * 3 + 1] = c.g * j; tcol[i * 3 + 2] = c.b * j;
+}
+terrainGeo.setAttribute('color', new THREE.BufferAttribute(tcol, 3));
+terrainGeo.computeVertexNormals();
+const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+scene.add(terrain);
+
+// ============================================================
+// Water — lake + river
+// ============================================================
+const waterMat = new THREE.MeshPhongMaterial({
+  color: 0x1d4a6e, specular: 0xbfe0ff, shininess: 90,
+  transparent: true, opacity: 0.86
+});
+function addWater(x, z, w, h, rotY = 0) {
+  const g = new THREE.PlaneGeometry(w, h, 1, 1);
+  g.rotateX(-Math.PI / 2);
+  const m = new THREE.Mesh(g, waterMat);
+  m.position.set(x, 4, z);
+  m.rotation.y = rotY;
+  scene.add(m);
+  return m;
+}
+addWater(2400, -3200, 2600, 2000);             // big lake NE
+addWater(-3000, 1800, 4400, 360, 0.5);          // river segment 1
+addWater(-5200, 4200, 3600, 320, 0.9);          // river segment 2
+
+// ============================================================
+// Airports — 4 of them
+// ============================================================
+const airports = [
+  { name: 'KCEN', x: 0, z: 0, hdg: 0 },
+  { name: 'KNOR', x: 4200, z: -1800, hdg: 0.5 },
+  { name: 'KEST', x: -3800, z: -4400, hdg: -0.3 },
+  { name: 'KWST', x: -200, z: 5200, hdg: 1.2 },
+];
+function buildAirport(a) {
+  const grp = new THREE.Group();
+  const baseY = groundAt(a.x, a.z);
+  const apron = new THREE.Mesh(
+    new THREE.PlaneGeometry(1800, 1200),
+    new THREE.MeshLambertMaterial({ color: 0x6a7a5d })
+  );
+  apron.rotation.x = -Math.PI / 2;
+  apron.position.set(0, 0.4, 0);
+  grp.add(apron);
+  const rw = new THREE.Mesh(
+    new THREE.PlaneGeometry(1600, 60),
+    new THREE.MeshLambertMaterial({ color: 0x222222 })
+  );
+  rw.rotation.x = -Math.PI / 2;
+  rw.position.set(0, 0.6, 0);
+  grp.add(rw);
+  for (let i = -750; i <= 750; i += 60) {
+    const d = new THREE.Mesh(
+      new THREE.PlaneGeometry(28, 2),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    d.rotation.x = -Math.PI / 2;
+    d.position.set(i, 0.7, 0);
+    grp.add(d);
+  }
+  for (const sx of [-800, 800]) {
+    for (let k = -24; k <= 24; k += 8) {
+      const t = new THREE.Mesh(
+        new THREE.PlaneGeometry(16, 4),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      );
+      t.rotation.x = -Math.PI / 2;
+      t.position.set(sx, 0.7, k);
+      grp.add(t);
+    }
+  }
+  const term = new THREE.Mesh(
+    new THREE.BoxGeometry(140, 22, 60),
+    new THREE.MeshLambertMaterial({ color: 0xbac3cc })
+  );
+  term.position.set(0, 11, 200);
+  grp.add(term);
+  const tow = new THREE.Mesh(
+    new THREE.BoxGeometry(18, 60, 18),
+    new THREE.MeshLambertMaterial({ color: 0xd0d5dc })
+  );
+  tow.position.set(80, 30, 220);
+  grp.add(tow);
+  for (let i = -780; i <= 780; i += 90) {
+    for (const sz of [-32, 32]) {
+      const L = new THREE.Mesh(
+        new THREE.BoxGeometry(2, 1.5, 2),
+        new THREE.MeshBasicMaterial({ color: 0xfff2b0 })
+      );
+      L.position.set(i, 1.2, sz);
+      grp.add(L);
+    }
+  }
+  grp.position.set(a.x, baseY, a.z);
+  grp.rotation.y = a.hdg;
+  a.baseY = baseY;
+  a.group = grp;
+  scene.add(grp);
+}
+airports.forEach(buildAirport);
+
+// ============================================================
+// City near KNOR — boxy towers
+// ============================================================
+function buildCity(cx, cz) {
+  const grp = new THREE.Group();
+  const gridR = 6;
+  for (let i = -gridR; i <= gridR; i++) {
+    for (let j = -gridR; j <= gridR; j++) {
+      if (Math.random() < 0.18) continue;
+      const w = 60 + Math.random() * 80;
+      const d = 60 + Math.random() * 80;
+      const h = 30 + Math.random() * 220;
+      const x = cx + i * 130 + (Math.random() - 0.5) * 18;
+      const z = cz + j * 130 + (Math.random() - 0.5) * 18;
+      const g = groundAt(x, z);
+      const color = new THREE.Color().setHSL(0.55 + Math.random() * 0.05, 0.05 + Math.random() * 0.1, 0.45 + Math.random() * 0.25);
+      const b = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshLambertMaterial({ color })
+      );
+      b.position.set(x, g + h / 2, z);
+      grp.add(b);
+    }
+  }
+  scene.add(grp);
+}
+buildCity(3200, -1100);
+
+// ============================================================
+// Stars (visible at night)
+// ============================================================
+const starGeo = new THREE.BufferGeometry();
+const sCount = 1400;
+const sPos = new Float32Array(sCount * 3);
+for (let i = 0; i < sCount; i++) {
+  const u = Math.random(), v = Math.random();
+  const th = u * Math.PI * 2, ph = Math.acos(2 * v - 1);
+  const r = 13500;
+  sPos[i * 3] = r * Math.sin(ph) * Math.cos(th);
+  sPos[i * 3 + 1] = Math.abs(r * Math.cos(ph)) * 0.7;
+  sPos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
+const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 8, sizeAttenuation: false, transparent: true, opacity: 0, fog: false });
+const stars = new THREE.Points(starGeo, starMat);
+scene.add(stars);
+
+// ============================================================
+// Sun disc + lens flare (cheap quad sprites)
+// ============================================================
+function discTexture(size, inner) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d');
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(inner, 'rgba(255,240,200,0.85)');
+  g.addColorStop(1, 'rgba(255,200,120,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const sunTex = discTexture(128, 0.25);
+const flareTex = discTexture(128, 0.05);
+const sunMat = new THREE.SpriteMaterial({ map: sunTex, transparent: true, depthWrite: false, depthTest: false, fog: false, blending: THREE.AdditiveBlending });
+const sunSprite = new THREE.Sprite(sunMat);
+sunSprite.scale.set(900, 900, 1);
+scene.add(sunSprite);
+
+// Flare ghosts along screen-space line camera→sun
+const flareGroup = new THREE.Group();
+scene.add(flareGroup);
+const flareSpecs = [
+  { s: 220, off: 0.3, col: 0xffd8a0, alpha: 0.55 },
+  { s: 120, off: 0.55, col: 0x88ccff, alpha: 0.35 },
+  { s: 300, off: 0.85, col: 0xffa07a, alpha: 0.4 },
+  { s: 90, off: 1.15, col: 0xffffff, alpha: 0.5 },
+  { s: 180, off: 1.45, col: 0x9bd0ff, alpha: 0.3 },
+];
+const flares = flareSpecs.map(f => {
+  const m = new THREE.SpriteMaterial({ map: flareTex, color: f.col, transparent: true, opacity: 0, depthWrite: false, depthTest: false, fog: false, blending: THREE.AdditiveBlending });
+  const s = new THREE.Sprite(m);
+  s.scale.set(f.s, f.s, 1);
+  s.userData = f;
+  flareGroup.add(s);
+  return s;
+});
+
+// ============================================================
+// Aircraft model — small low-poly with rim-friendly normals
+// ============================================================
+const plane = new THREE.Group();
+const planeMatBody = new THREE.MeshPhongMaterial({ color: 0xe8eef2, specular: 0x666666, shininess: 60 });
+const planeMatAccent = new THREE.MeshPhongMaterial({ color: 0xd23a3a, specular: 0x553333, shininess: 80 });
+const planeMatDark = new THREE.MeshPhongMaterial({ color: 0x1a1a1a, shininess: 100 });
+
+const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.5, 7, 14), planeMatBody);
+fuselage.rotation.z = Math.PI / 2;
+plane.add(fuselage);
+const nose = new THREE.Mesh(new THREE.ConeGeometry(0.8, 1.8, 14), planeMatBody);
+nose.rotation.z = -Math.PI / 2;
+nose.position.x = 4.4;
+plane.add(nose);
+// canopy
+const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.85, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshPhongMaterial({ color: 0x3b6e8a, specular: 0xffffff, shininess: 140, transparent: true, opacity: 0.7 }));
+canopy.position.set(0.6, 0.6, 0);
+plane.add(canopy);
+// wings
+const wing = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.18, 9.5), planeMatBody);
+wing.position.y = 0.1;
+plane.add(wing);
+// wing accent stripe
+const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.05, 0.8), planeMatAccent);
+stripe.position.set(0, 0.21, 0);
+plane.add(stripe);
+// wing tips
+for (const sz of [-4.7, 4.7]) {
+  const tip = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.4), planeMatAccent);
+  tip.position.set(0, 0.18, sz);
+  plane.add(tip);
+}
+// tail
+const tail = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2, 0.18), planeMatBody);
+tail.position.set(-3.0, 0.85, 0);
+plane.add(tail);
+const hstab = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.14, 3.2), planeMatBody);
+hstab.position.set(-2.9, 0.2, 0);
+plane.add(hstab);
+// propeller
+const propHub = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.3, 10), planeMatDark);
+propHub.rotation.z = Math.PI / 2;
+propHub.position.x = 5.4;
+plane.add(propHub);
+const propBlades = new THREE.Mesh(new THREE.BoxGeometry(0.1, 3.4, 0.18), planeMatDark);
+propBlades.position.x = 5.5;
+plane.add(propBlades);
+// gear
+for (const sz of [-1.4, 1.4]) {
+  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.7, 6), planeMatDark);
+  leg.position.set(0.3, -0.6, sz);
+  plane.add(leg);
+  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.09, 6, 10), planeMatDark);
+  wheel.rotation.y = Math.PI / 2;
+  wheel.position.set(0.3, -1.0, sz);
+  plane.add(wheel);
+}
+scene.add(plane);
+
+// ============================================================
+// Flight state
+// ============================================================
+const state = {
+  pos: new THREE.Vector3(-700, 0, 0),  // on KCEN runway, west end
+  vel: new THREE.Vector3(0, 0, 0),
+  q: new THREE.Quaternion(),
+  throttle: 0,
+  brake: 0,
+  pitchIn: 0, rollIn: 0, yawIn: 0,
+  pitchRate: 0, rollRate: 0, yawRate: 0,
+  onGround: true,
+  speed: 0,
+  alt: 0,
+  vs: 0,
+  stall: false,
+  todPhase: 1, // 0..1 fraction of full day cycle
+  todPaused: false,
+};
+function reset() {
+  state.pos.set(-700, 0, 0);
+  state.pos.y = groundAt(state.pos.x, state.pos.z) + 1.0;
+  state.vel.set(0, 0, 0);
+  state.q.identity();
+  state.throttle = 0; state.brake = 0;
+  state.pitchIn = state.rollIn = state.yawIn = 0;
+  state.pitchRate = state.rollRate = state.yawRate = 0;
+  state.onGround = true;
+}
+reset();
+
+// ============================================================
+// Input
+// ============================================================
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyR') reset();
+  if (e.code === 'KeyT') { state.todPhase = (state.todPhase + 0.125) % 1; }
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+const intro = document.getElementById('intro');
+function dismissIntro() { intro.style.display = 'none'; }
+intro.addEventListener('click', dismissIntro);
+addEventListener('keydown', e => { if (e.code === 'Space' && intro.style.display !== 'none') dismissIntro(); });
+
+addEventListener('resize', () => {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+// ============================================================
+// Time of Day
+// ============================================================
+// Define keyframe palettes; we lerp between them along sun phase
+const TOD = [
+  // {time label, sunAlt(rad), sunAzi(rad), topSky, horSky, botSky, fogCol, sunColor, sunInt, hemiCol, hemiGrd, hemiInt, ambInt, rimCol, rimInt, exposure}
+  { lbl: '00:00', phase: 0.00, alt: -0.55, top: 0x040814, hor: 0x0a0f1e, bot: 0x000000, fog: 0x070b18, sunC: 0x223040, sunI: 0.05, hemC: 0x3a4a6a, hemG: 0x06080e, hemI: 0.25, ambI: 0.20, rimC: 0x6688aa, rimI: 0.25, exp: 0.85, stars: 1.0 },
+  { lbl: '05:00', phase: 0.10, alt: -0.10, top: 0x18243a, hor: 0xd07a40, bot: 0x100818, fog: 0xc0805a, sunC: 0xffb070, sunI: 0.4, hemC: 0x8a6080, hemG: 0x2a1e30, hemI: 0.35, ambI: 0.30, rimC: 0xff9966, rimI: 0.5, exp: 1.00, stars: 0.4 },
+  { lbl: '07:00', phase: 0.22, alt: 0.30, top: 0x4a7ec0, hor: 0xc8d8e8, bot: 0x44351a, fog: 0xbdd0e0, sunC: 0xfff0d0, sunI: 1.05, hemC: 0x88aacc, hemG: 0x223044, hemI: 0.55, ambI: 0.30, rimC: 0x88ccff, rimI: 0.55, exp: 1.05, stars: 0.0 },
+  { lbl: '12:00', phase: 0.42, alt: 0.95, top: 0x4f9fe5, hor: 0xc4dbef, bot: 0x4b5a55, fog: 0xc4dbef, sunC: 0xfff8e6, sunI: 1.25, hemC: 0x9bc2e0, hemG: 0x445a55, hemI: 0.65, ambI: 0.30, rimC: 0xaaccff, rimI: 0.50, exp: 1.10, stars: 0.0 },
+  { lbl: '17:00', phase: 0.62, alt: 0.35, top: 0x4068a8, hor: 0xe8b070, bot: 0x42301a, fog: 0xe0b080, sunC: 0xffe0a0, sunI: 1.10, hemC: 0xc8a070, hemG: 0x3a2820, hemI: 0.55, ambI: 0.30, rimC: 0xffaa66, rimI: 0.55, exp: 1.10, stars: 0.0 },
+  { lbl: '19:00', phase: 0.74, alt: 0.05, top: 0x1f3a70, hor: 0xff7c45, bot: 0x180a14, fog: 0xd87050, sunC: 0xff8040, sunI: 0.7, hemC: 0xa05080, hemG: 0x301828, hemI: 0.40, ambI: 0.30, rimC: 0xff8866, rimI: 0.60, exp: 1.05, stars: 0.2 },
+  { lbl: '21:00', phase: 0.84, alt: -0.20, top: 0x0a1228, hor: 0x2a2240, bot: 0x040408, fog: 0x1a1828, sunC: 0x4458a0, sunI: 0.10, hemC: 0x4a5878, hemG: 0x08080e, hemI: 0.30, ambI: 0.25, rimC: 0x7799cc, rimI: 0.35, exp: 0.95, stars: 0.7 },
+  { lbl: '23:30', phase: 0.98, alt: -0.50, top: 0x040814, hor: 0x0a0f1e, bot: 0x000000, fog: 0x070b18, sunC: 0x223040, sunI: 0.05, hemC: 0x3a4a6a, hemG: 0x06080e, hemI: 0.25, ambI: 0.20, rimC: 0x6688aa, rimI: 0.25, exp: 0.85, stars: 0.95 },
+];
+function lerpC(a, b, t, out) { return out.copy(a).lerp(b, t); }
+function applyTOD(phase) {
+  // find segment
+  let i = 0;
+  while (i < TOD.length - 1 && TOD[i + 1].phase < phase) i++;
+  const a = TOD[i], b = TOD[(i + 1) % TOD.length];
+  const span = (b.phase - a.phase + 1) % 1 || 1;
+  const t = Math.min(1, Math.max(0, ((phase - a.phase + 1) % 1) / span));
+  // colors
+  const ca = new THREE.Color(), cb = new THREE.Color(), cur = new THREE.Color();
+  skyTopC.set(a.top).lerp(new THREE.Color(b.top), t);
+  skyHorC.set(a.hor).lerp(new THREE.Color(b.hor), t);
+  skyBotC.set(a.bot).lerp(new THREE.Color(b.bot), t);
+  // fog
+  scene.fog.color.set(a.fog).lerp(new THREE.Color(b.fog), t);
+  // sun position
+  const alt = a.alt + (b.alt - a.alt) * t;
+  // azimuth slowly rotates through the day
+  const azi = phase * Math.PI * 2 - Math.PI / 2;
+  const R = 9000;
+  const sx = Math.cos(azi) * Math.cos(alt) * R;
+  const sy = Math.sin(alt) * R;
+  const sz = Math.sin(azi) * Math.cos(alt) * R;
+  const target = plane.position;
+  sun.position.set(target.x + sx, target.y + sy, target.z + sz);
+  sunTarget.position.copy(target);
+  rim.position.set(target.x - sx * 0.6, target.y + Math.abs(sy) * 0.3 + 200, target.z - sz * 0.6);
+  rimTarget.position.copy(target);
+  sunSprite.position.copy(sun.position);
+  // sun color and intensity
+  sun.color.set(a.sunC).lerp(new THREE.Color(b.sunC), t);
+  sun.intensity = a.sunI + (b.sunI - a.sunI) * t;
+  hemi.color.set(a.hemC).lerp(new THREE.Color(b.hemC), t);
+  hemi.groundColor.set(a.hemG).lerp(new THREE.Color(b.hemG), t);
+  hemi.intensity = a.hemI + (b.hemI - a.hemI) * t;
+  ambient.intensity = a.ambI + (b.ambI - a.ambI) * t;
+  rim.color.set(a.rimC).lerp(new THREE.Color(b.rimC), t);
+  rim.intensity = a.rimI + (b.rimI - a.rimI) * t;
+  renderer.toneMappingExposure = a.exp + (b.exp - a.exp) * t;
+  // sun sprite color matches sun
+  sunMat.color.copy(sun.color);
+  // stars
+  starMat.opacity = a.stars + (b.stars - a.stars) * t;
+  // water color shifts with horizon
+  waterMat.color.copy(skyHorC).multiplyScalar(0.35).add(new THREE.Color(0x102a3e));
+  paintSky();
+  // HUD time
+  const hr = phase * 24;
+  const H = Math.floor(hr).toString().padStart(2, '0');
+  const M = Math.floor((hr - Math.floor(hr)) * 60).toString().padStart(2, '0');
+  document.getElementById('todTime').textContent = `${H}:${M}`;
+  const phases = ['night', 'dawn', 'morning', 'midday', 'afternoon', 'golden', 'dusk', 'night'];
+  document.getElementById('todPhase').textContent = phases[Math.min(phases.length - 1, Math.floor(phase * phases.length))];
+}
+
+// ============================================================
+// Physics — simple arcade flight
+// ============================================================
+const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
+function step2(dt) {
+  // input
+  const tIn = (keys['KeyW'] ? 1 : 0) - (keys['KeyS'] ? 1 : 0);
+  state.throttle = Math.max(0, Math.min(1, state.throttle + tIn * dt * 0.55));
+  state.brake = keys['Space'] ? 1 : 0;
+  const pitchInput = (keys['ArrowDown'] ? 1 : 0) - (keys['ArrowUp'] ? 1 : 0);
+  const rollInput = (keys['ArrowRight'] ? 1 : 0) - (keys['ArrowLeft'] ? 1 : 0);
+  const yawInput = (keys['KeyD'] ? 1 : 0) - (keys['KeyA'] ? 1 : 0);
+
+  // body axes
+  const fwd = new THREE.Vector3(1, 0, 0).applyQuaternion(state.q);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(state.q);
+  const right = new THREE.Vector3(0, 0, 1).applyQuaternion(state.q);
+
+  // angular rates damped
+  state.pitchRate += (-pitchInput * 1.4 - state.pitchRate) * Math.min(1, dt * 4);
+  state.rollRate += (rollInput * 2.6 - state.rollRate) * Math.min(1, dt * 5);
+  state.yawRate += (yawInput * 0.9 - state.yawRate) * Math.min(1, dt * 3);
+
+  // apply rotations around body axes:
+  // pitch = around right axis
+  tmpQ.setFromAxisAngle(right, state.pitchRate * dt); state.q.premultiply(tmpQ);
+  // roll = around forward axis
+  tmpQ.setFromAxisAngle(fwd, state.rollRate * dt); state.q.premultiply(tmpQ);
+  // yaw = around up axis
+  tmpQ.setFromAxisAngle(up, state.yawRate * dt); state.q.premultiply(tmpQ);
+
+  // recompute axes after rotation
+  fwd.set(1, 0, 0).applyQuaternion(state.q);
+  up.set(0, 1, 0).applyQuaternion(state.q);
+
+  // thrust along fwd
+  const maxThrust = 380;
+  const thrust = tmpV.copy(fwd).multiplyScalar(maxThrust * state.throttle);
+  state.vel.add(thrust.multiplyScalar(dt));
+  // gravity
+  state.vel.y -= 9.81 * dt;
+  // lift — scales with forward airspeed component
+  const vfwd = state.vel.dot(fwd);
+  const speed = state.vel.length();
+  const lift = Math.max(0, vfwd) * 0.55;
+  state.vel.add(tmpV.copy(up).multiplyScalar(lift * dt));
+  // stall: if AoA too high or speed too low, lose lift
+  const aoa = Math.atan2(-state.vel.clone().normalize().dot(up), Math.max(0.01, vfwd / Math.max(1, speed)));
+  state.stall = (speed < 28 && state.alt > 5) || aoa > 0.6;
+  if (state.stall) state.vel.y -= 6 * dt;
+  // drag — quadratic
+  const drag = state.vel.clone().multiplyScalar(-0.0009 * speed);
+  state.vel.add(drag.multiplyScalar(dt));
+  // brakes on ground
+  if (state.onGround && state.brake) state.vel.multiplyScalar(Math.max(0, 1 - dt * 1.2));
+
+  // integrate
+  state.pos.addScaledVector(state.vel, dt);
+  // ground collision
+  const g = groundAt(state.pos.x, state.pos.z);
+  if (state.pos.y <= g + 1.0) {
+    state.pos.y = g + 1.0;
+    if (state.vel.y < 0) state.vel.y = 0;
+    state.onGround = true;
+    // ground friction
+    state.vel.x *= Math.max(0, 1 - dt * 0.6);
+    state.vel.z *= Math.max(0, 1 - dt * 0.6);
+    // keep plane upright on ground
+    const flatQ = new THREE.Quaternion();
+    // get yaw only
+    const f = new THREE.Vector3(1, 0, 0).applyQuaternion(state.q);
+    const yaw = Math.atan2(f.z, f.x);
+    flatQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -yaw);
+    state.q.slerp(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -yaw), Math.min(1, dt * 2));
+  } else {
+    state.onGround = false;
+  }
+  // edge clamp
+  const E = WORLD / 2 - 200;
+  if (state.pos.x > E) { state.pos.x = E; state.vel.x = 0; }
+  if (state.pos.x < -E) { state.pos.x = -E; state.vel.x = 0; }
+  if (state.pos.z > E) { state.pos.z = E; state.vel.z = 0; }
+  if (state.pos.z < -E) { state.pos.z = -E; state.vel.z = 0; }
+
+  // apply to plane
+  plane.position.copy(state.pos);
+  plane.quaternion.copy(state.q);
+  // spin prop
+  propBlades.rotation.x += (0.6 + state.throttle * 1.6 + speed * 0.01) * 50 * dt;
+
+  // HUD
+  state.speed = speed;
+  state.alt = state.pos.y - g;
+  state.vs = state.vel.y;
+  const hudHdg = ((Math.atan2(fwd.z, fwd.x) * 180 / Math.PI + 360) % 360);
+  document.getElementById('spd').textContent = (speed * 3.6).toFixed(0);
+  document.getElementById('alt').textContent = state.pos.y.toFixed(0);
+  document.getElementById('hdg').textContent = hudHdg.toFixed(0).padStart(3, '0');
+  document.getElementById('vs').textContent = state.vs.toFixed(1);
+  document.getElementById('thr').textContent = (state.throttle * 100).toFixed(0);
+  document.getElementById('stall').style.display = state.stall ? '' : 'none';
+  // nearest field
+  let nearest = airports[0], nd = Infinity;
+  for (const a of airports) {
+    const dx = a.x - state.pos.x, dz = a.z - state.pos.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d < nd) { nd = d; nearest = a; }
+  }
+  document.getElementById('apnear').textContent = `${nearest.name} ${(nd / 1000).toFixed(1)}km`;
+}
+
+// ============================================================
+// Camera — chase cam with subtle springiness
+// ============================================================
+const camOffset = new THREE.Vector3(-22, 7, 0);
+const camTmp = new THREE.Vector3();
+function updateCamera(dt) {
+  const offWorld = camOffset.clone().applyQuaternion(state.q);
+  const want = camTmp.copy(state.pos).add(offWorld);
+  // keep camera above ground
+  const ga = groundAt(want.x, want.z) + 4;
+  if (want.y < ga) want.y = ga;
+  camera.position.lerp(want, Math.min(1, dt * 4));
+  const look = new THREE.Vector3().copy(state.pos).add(new THREE.Vector3(8, 1.5, 0).applyQuaternion(state.q));
+  camera.lookAt(look);
+}
+
+// ============================================================
+// Lens flare ghost update
+// ============================================================
+const ndc = new THREE.Vector3();
+const ndc2 = new THREE.Vector3();
+function updateFlare() {
+  // project sun to NDC
+  ndc.copy(sun.position).project(camera);
+  const onScreen = ndc.x > -1.2 && ndc.x < 1.2 && ndc.y > -1.2 && ndc.y < 1.2 && ndc.z < 1;
+  // is sun blocked by terrain? quick check: if sun altitude below 0, hide flare
+  const sunVec = sun.position.clone().sub(camera.position).normalize();
+  const camFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  const facing = sunVec.dot(camFwd);
+  const visible = onScreen && facing > 0.05 && sun.position.y > 0;
+  flares.forEach((f, idx) => {
+    const o = f.userData.off;
+    // ghost positions go from sun (NDC) through center (0,0)
+    ndc2.set(-ndc.x * o * 1.4, -ndc.y * o * 1.4, 0.5);
+    ndc2.unproject(camera);
+    f.position.copy(ndc2);
+    f.material.opacity = visible ? f.userData.alpha * Math.max(0, 1 - Math.abs(o - 0.5) * 0.3) : 0;
+    f.material.color.set(f.userData.col);
+  });
+  // sun sprite size grows when low
+  const altFactor = Math.max(0, sun.position.y / 9000);
+  sunSprite.scale.setScalar(700 + (1 - altFactor) * 700);
+}
+
+// ============================================================
+// Loop
+// ============================================================
+let last = performance.now();
+function loop() {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  // advance TOD only if not paused (auto-advance very slowly)
+  if (!state.todPaused) state.todPhase = (state.todPhase + dt * 0.01) % 1;
+  applyTOD(state.todPhase);
+  step2(dt);
+  updateCamera(dt);
+  updateFlare();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+// kick off
+applyTOD(state.todPhase);
+loop();
+</script>
+</body>
+</html>
