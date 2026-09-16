@@ -46,9 +46,10 @@
 <div id="tod" class="panel">
   <div class="big" id="todTime">06:00</div>
   <div class="sub" id="todPhase">dawn</div>
+  <div class="sub" id="todHold" style="display:none; color:#ffd166; font-weight:700;">⏸ HOLD</div>
 </div>
 <div id="help" class="panel">
-  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>↑</kbd>/<kbd>↓</kbd> pitch · <kbd>←</kbd>/<kbd>→</kbd> roll · <kbd>A</kbd>/<kbd>D</kbd> yaw · <kbd>Space</kbd> brakes · <kbd>T</kbd> time · <kbd>R</kbd> reset
+  <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>↑</kbd>/<kbd>↓</kbd> pitch · <kbd>←</kbd>/<kbd>→</kbd> roll · <kbd>A</kbd>/<kbd>D</kbd> yaw · <kbd>Space</kbd> brakes · <kbd>T</kbd> time · <kbd>P</kbd> hold time · <kbd>R</kbd> reset
 </div>
 <div id="intro">
   <div class="card">
@@ -61,6 +62,7 @@
       <span>Yaw (rudder)</span><span><kbd>A</kbd> / <kbd>D</kbd></span>
       <span>Brakes (ground)</span><span><kbd>Space</kbd></span>
       <span>Cycle time of day</span><span><kbd>T</kbd></span>
+      <span>Freeze / resume time of day</span><span><kbd>P</kbd></span>
       <span>Reset</span><span><kbd>R</kbd></span>
     </div>
     <div class="tip">
@@ -537,6 +539,10 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyR') reset();
   if (e.code === 'KeyT') { state.todPhase = (state.todPhase + 0.125) % 1; }
+  if (e.code === 'KeyP') {
+    state.todPaused = !state.todPaused;
+    document.getElementById('todHold').style.display = state.todPaused ? '' : 'none';
+  }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
